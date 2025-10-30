@@ -93,10 +93,12 @@ func cmdHashObject(path string) {
 	// compress and write to file
 	odir := ".git/objects/" + hex[:2]
 	opath := odir + "/" + hex[2:]
+
 	// - create dir
 	if err := os.MkdirAll(odir, 0755); err != nil {
 		panic(err)
 	}
+
 	// - create file
 	ofile, err := os.Create(opath)
 	if err != nil {
@@ -104,6 +106,7 @@ func cmdHashObject(path string) {
 		panic(err)
 	}
 	defer ofile.Close()
+
 	// - compress
 	w := zlib.NewWriter(ofile)
 	defer w.Close()
