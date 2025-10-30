@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"os"
-	"slices"
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -24,6 +24,8 @@ func main() {
 		cmdInit()
 	case "cat-file":
 		cmdCatFile(os.Args[3])
+	case "hash-object":
+		cmdHashObject(os.Args[3])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
@@ -47,34 +49,68 @@ func cmdInit() {
 
 func cmdCatFile(hash string) {
 	path := ".git/objects/" + hash[:2] + "/" + hash[2:]
-	compressed, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
+		panic(err)
+	}
+	defer f.Close()
+
+	z, err := zlib.NewReader(f)
+	if err != nil {
+		panic(err)
+	}
+	defer z.Close()
+
+	data, err := io.ReadAll(z)
+	if err != nil {
+		panic(err)
 	}
 
-	// decompress
-	b := bytes.NewReader(compressed)
-	r, err := zlib.NewReader(b)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-	defer r.Close()
+	// print data after nullByteIndex
+	nullByteIndex := bytes.IndexByte(data, 0)
+	fmt.Printf("%s", data[nullByteIndex+1:])
+}
 
-	uncompressed, err := io.ReadAll(r)
+func cmdHashObject(path string) {
+	f, err := os.Open(path)
 	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
+		panic(err)
 	}
 
-	// The object file format is:
-	// <type> <size>\0<content>
-	// blob 14\0Hello, World!
-	nullByte := slices.Index(uncompressed, 0)
-	// size, _ := strconv.Atoi(string(uncompressed[5:nullByte]))
-	// fmt.Println("size bytes:", size)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
 
-	data := uncompressed[nullByte+1:]
-	fmt.Printf("%s", data)
+	// blob <size>\x00<data>
+	bytes := fmt.Appendf([]byte("blob "), "%v\x00", len(data))
+	bytes = append(bytes, data...)
+
+	// the hash
+	hash := sha1.Sum(bytes)
+	hex := fmt.Sprintf("%x", hash) // to HEX
+
+	// compress and write to file
+	odir := ".git/objects/" + hex[:2]
+	opath := odir + "/" + hex[2:]
+	// - create dir
+	if err := os.MkdirAll(odir, 0755); err != nil {
+		panic(err)
+	}
+	// - create file
+	ofile, err := os.Create(opath)
+	if err != nil {
+		fmt.Printf("failed to create file: %s", opath)
+		panic(err)
+	}
+	defer ofile.Close()
+	// - compress
+	w := zlib.NewWriter(ofile)
+	defer w.Close()
+
+	_, err = w.Write(bytes)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("%x", hash)
 }
