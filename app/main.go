@@ -188,13 +188,13 @@ func cmdLsTree(hash string, nameOnly bool) {
 			break
 		}
 
-		// append part before null byte
+		// extract mode and name part
 		modeNamePart := content[cursor : cursor+nextNullByteIndex]
 		modeName := bytes.Split(modeNamePart, []byte(" "))
 		mode := string(modeName[0])
 		name := string(modeName[1])
 
-		// append next 20 bytes (sha)
+		// extract next 20 bytes (sha)
 		shaStart := cursor + nextNullByteIndex + 1
 		shaEnd := shaStart + 20
 		shaPart := content[shaStart:shaEnd]
