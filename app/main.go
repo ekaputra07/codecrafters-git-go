@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -26,6 +27,18 @@ func main() {
 		cmdCatFile(os.Args[3])
 	case "hash-object":
 		cmdHashObject(os.Args[3])
+	case "ls-tree":
+		args := os.Args[2:]
+		if len(args) == 1 {
+			cmdLsTree(args[0], false)
+		} else {
+			nameOnlyIndex := slices.Index(args, "--name-only")
+			if nameOnlyIndex == 0 {
+				cmdLsTree(args[1], true)
+			} else {
+				cmdLsTree(args[0], true)
+			}
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
@@ -116,4 +129,95 @@ func cmdHashObject(path string) {
 		panic(err)
 	}
 	fmt.Printf("%x", hash)
+}
+
+type treeEntry struct {
+	mode string
+	kind string
+	name string
+	hash string
+}
+
+func (tr treeEntry) String() string {
+	return fmt.Sprintf("%s %s %s\t%s", tr.mode, tr.kind, tr.hash, tr.name)
+}
+
+func (tr treeEntry) NameOnly() string {
+	return tr.name
+}
+
+// cmdLsTree lists the contents of a tree object given its hash.
+// it supports the --name-only flag to print only the names of the entries.
+func cmdLsTree(hash string, nameOnly bool) {
+	path := ".git/objects/" + hash[:2] + "/" + hash[2:]
+
+	// open object file
+	f, err := os.Open(path)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	// decompress object file
+	z, err := zlib.NewReader(f)
+	if err != nil {
+		panic(err)
+	}
+	defer z.Close()
+
+	// read all data
+	data, err := io.ReadAll(z)
+	if err != nil {
+		panic(err)
+	}
+
+	// parse tree entries
+	// data format:
+	// tree <size>\0<mode1> <name1>\0<20_byte_sha><mode2> <name2>\0<20_byte_sha>...
+	nullByteIndex := bytes.IndexByte(data, 0)
+	// header := data[:nullByteIndex] // header unsed for now
+	content := data[nullByteIndex+1:]
+
+	// loop through content to extract mode/name and sha, create treeEntry and print
+	cursor := 0
+	for {
+		// find next null byte
+		nextNullByteIndex := bytes.IndexByte(content[cursor:], 0)
+		if nextNullByteIndex == -1 {
+			// no more null bytes
+			break
+		}
+
+		// append part before null byte
+		modeNamePart := content[cursor : cursor+nextNullByteIndex]
+		modeName := bytes.Split(modeNamePart, []byte(" "))
+		mode := string(modeName[0])
+		name := string(modeName[1])
+
+		// append next 20 bytes (sha)
+		shaStart := cursor + nextNullByteIndex + 1
+		shaEnd := shaStart + 20
+		shaPart := content[shaStart:shaEnd]
+
+		// move cursor past null byte
+		cursor = shaEnd
+
+		// create tree entry
+		e := treeEntry{
+			mode: mode,
+			name: name,
+			hash: fmt.Sprintf("%x", shaPart),
+		}
+		if mode == "40000" {
+			e.kind = "tree"
+		} else {
+			e.kind = "blob"
+		}
+
+		if nameOnly {
+			fmt.Println(e.NameOnly())
+		} else {
+			fmt.Println(e.String())
+		}
+	}
 }
