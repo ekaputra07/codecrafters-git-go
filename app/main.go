@@ -334,7 +334,7 @@ func cmdCommitTree(treeSHA, parentSHA, message string) [20]byte {
 	body.WriteString(fmt.Sprintf("parent %s\n", parentSHA))
 	body.WriteString("author eka <eka@example.com> 946684800 +0000\n")
 	body.WriteString("commiter eka <eka@example.com> 946684800 +0000\n")
-	body.WriteString("\n" + message)
+	body.WriteString("\n" + message + "\n")
 
 	// commit <size>\0<body>
 	var header bytes.Buffer
