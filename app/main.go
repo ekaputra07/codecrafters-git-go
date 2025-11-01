@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 )
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
@@ -23,11 +24,17 @@ func main() {
 	switch command := os.Args[1]; command {
 	case "init":
 		cmdInit()
+
 	case "cat-file":
-		cmdCatFile(os.Args[3])
+		data := cmdCatFile(os.Args[3])
+		fmt.Printf("%s", data)
+
 	case "hash-object":
-		cmdHashObject(os.Args[3])
+		hash := cmdHashObject(os.Args[3])
+		fmt.Printf("%x", hash)
+
 	case "ls-tree":
+		// support optional --name-only flag
 		args := os.Args[2:]
 		if len(args) == 1 {
 			cmdLsTree(args[0], false)
@@ -39,6 +46,11 @@ func main() {
 				cmdLsTree(args[0], true)
 			}
 		}
+
+	case "write-tree":
+		hash := writeTree(".")
+		fmt.Printf("%x", hash)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
@@ -60,7 +72,7 @@ func cmdInit() {
 	fmt.Println("Initialized git directory")
 }
 
-func cmdCatFile(hash string) {
+func cmdCatFile(hash string) []byte {
 	path := ".git/objects/" + hash[:2] + "/" + hash[2:]
 	f, err := os.Open(path)
 	if err != nil {
@@ -81,10 +93,10 @@ func cmdCatFile(hash string) {
 
 	// print data after nullByteIndex
 	nullByteIndex := bytes.IndexByte(data, 0)
-	fmt.Printf("%s", data[nullByteIndex+1:])
+	return data[nullByteIndex+1:]
 }
 
-func cmdHashObject(path string) {
+func cmdHashObject(path string) [20]byte {
 	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
@@ -128,18 +140,18 @@ func cmdHashObject(path string) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("%x", hash)
+	return hash
 }
 
 type treeEntry struct {
 	mode string
 	kind string
 	name string
-	hash string
+	hash [20]byte
 }
 
 func (tr treeEntry) String() string {
-	return fmt.Sprintf("%s %s %s\t%s", tr.mode, tr.kind, tr.hash, tr.name)
+	return fmt.Sprintf("%s %s %x\t%s", tr.mode, tr.kind, tr.hash, tr.name)
 }
 
 func (tr treeEntry) NameOnly() string {
@@ -206,7 +218,7 @@ func cmdLsTree(hash string, nameOnly bool) {
 		e := treeEntry{
 			mode: mode,
 			name: name,
-			hash: fmt.Sprintf("%x", shaPart),
+			hash: [20]byte(shaPart),
 		}
 		if mode == "40000" {
 			e.kind = "tree"
@@ -220,4 +232,90 @@ func cmdLsTree(hash string, nameOnly bool) {
 			fmt.Println(e.String())
 		}
 	}
+}
+
+func writeTree(baseDir string) [20]byte {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		panic(err)
+	}
+
+	treeEntries := []treeEntry{}
+
+	for _, entry := range entries {
+		// skip .git directory
+		if entry.IsDir() {
+			if entry.Name() == ".git" {
+				continue
+			}
+			// recursively write tree for subdirectory
+			hash := writeTree(baseDir + "/" + entry.Name())
+			treeEntries = append(treeEntries, treeEntry{
+				mode: "40000",
+				kind: "tree",
+				name: entry.Name(),
+				hash: hash,
+			})
+		} else {
+			hash := cmdHashObject(baseDir + "/" + entry.Name())
+			treeEntries = append(treeEntries, treeEntry{
+				mode: "100644",
+				kind: "blob",
+				name: entry.Name(),
+				hash: hash,
+			})
+		}
+	}
+
+	// order entries by name
+	slices.SortFunc(treeEntries, func(a, b treeEntry) int {
+		return strings.Compare(a.name, b.name)
+	})
+
+	// build tree object content
+	var body bytes.Buffer
+	for _, entry := range treeEntries {
+		// format: <mode1> <name1>\0<20_byte_sha><mode2> <name2>\0<20_byte_sha>
+		body.WriteString(fmt.Sprintf("%s %s", entry.mode, entry.name))
+		body.WriteByte(0)
+		body.Write(entry.hash[:])
+	}
+	// tree <size>\0<body>
+	var header bytes.Buffer
+	header.WriteString("tree ")
+	header.WriteString(fmt.Sprintf("%d", body.Len()))
+	header.WriteByte(0)
+
+	fullObject := append(header.Bytes(), body.Bytes()...)
+
+	// hash the tree object
+	hash := sha1.Sum(fullObject)
+	hex := fmt.Sprintf("%x", hash) // to HEX
+
+	// compress and write to file
+	odir := ".git/objects/" + hex[:2]
+	opath := odir + "/" + hex[2:]
+
+	// - create dir
+	if err := os.MkdirAll(odir, 0755); err != nil {
+		panic(err)
+	}
+
+	// - create file
+	ofile, err := os.Create(opath)
+	if err != nil {
+		fmt.Printf("failed to create file: %s", opath)
+		panic(err)
+	}
+	defer ofile.Close()
+
+	// - compress
+	w := zlib.NewWriter(ofile)
+	defer w.Close()
+
+	_, err = w.Write(fullObject)
+	if err != nil {
+		panic(err)
+	}
+	return hash
 }
