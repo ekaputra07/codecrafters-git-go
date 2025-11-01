@@ -51,6 +51,13 @@ func main() {
 		hash := writeTree(".")
 		fmt.Printf("%x", hash)
 
+	case "commit-tree":
+		treeSHA := os.Args[2]
+		parentSHA := os.Args[4]
+		message := os.Args[6]
+		hash := cmdCommitTree(treeSHA, parentSHA, message)
+		fmt.Printf("%x", hash)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
@@ -289,6 +296,55 @@ func writeTree(baseDir string) [20]byte {
 	fullObject := append(header.Bytes(), body.Bytes()...)
 
 	// hash the tree object
+	hash := sha1.Sum(fullObject)
+	hex := fmt.Sprintf("%x", hash) // to HEX
+
+	// compress and write to file
+	odir := ".git/objects/" + hex[:2]
+	opath := odir + "/" + hex[2:]
+
+	// - create dir
+	if err := os.MkdirAll(odir, 0755); err != nil {
+		panic(err)
+	}
+
+	// - create file
+	ofile, err := os.Create(opath)
+	if err != nil {
+		fmt.Printf("failed to create file: %s", opath)
+		panic(err)
+	}
+	defer ofile.Close()
+
+	// - compress
+	w := zlib.NewWriter(ofile)
+	defer w.Close()
+
+	_, err = w.Write(fullObject)
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}
+
+func cmdCommitTree(treeSHA, parentSHA, message string) [20]byte {
+	// build commit object content
+	var body bytes.Buffer
+	body.WriteString(fmt.Sprintf("tree %s\n", treeSHA))
+	body.WriteString(fmt.Sprintf("parent %s\n", parentSHA))
+	body.WriteString("author eka <eka@example.com> 946684800 +0000\n")
+	body.WriteString("commiter eka <eka@example.com> 946684800 +0000\n")
+	body.WriteString("\n" + message)
+
+	// commit <size>\0<body>
+	var header bytes.Buffer
+	header.WriteString("commit ")
+	header.WriteString(fmt.Sprintf("%d", body.Len()))
+	header.WriteByte(0)
+
+	fullObject := append(header.Bytes(), body.Bytes()...)
+
+	// hash the commit object
 	hash := sha1.Sum(fullObject)
 	hex := fmt.Sprintf("%x", hash) // to HEX
 
