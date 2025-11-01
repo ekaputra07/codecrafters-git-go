@@ -123,27 +123,7 @@ func cmdHashObject(path string) [20]byte {
 	hex := fmt.Sprintf("%x", hash) // to HEX
 
 	// compress and write to file
-	odir := ".git/objects/" + hex[:2]
-	opath := odir + "/" + hex[2:]
-
-	// - create dir
-	if err := os.MkdirAll(odir, 0755); err != nil {
-		panic(err)
-	}
-
-	// - create file
-	ofile, err := os.Create(opath)
-	if err != nil {
-		fmt.Printf("failed to create file: %s", opath)
-		panic(err)
-	}
-	defer ofile.Close()
-
-	// - compress
-	w := zlib.NewWriter(ofile)
-	defer w.Close()
-
-	_, err = w.Write(bytes)
+	err = writeObject(hex, bytes)
 	if err != nil {
 		panic(err)
 	}
@@ -300,27 +280,7 @@ func writeTree(baseDir string) [20]byte {
 	hex := fmt.Sprintf("%x", hash) // to HEX
 
 	// compress and write to file
-	odir := ".git/objects/" + hex[:2]
-	opath := odir + "/" + hex[2:]
-
-	// - create dir
-	if err := os.MkdirAll(odir, 0755); err != nil {
-		panic(err)
-	}
-
-	// - create file
-	ofile, err := os.Create(opath)
-	if err != nil {
-		fmt.Printf("failed to create file: %s", opath)
-		panic(err)
-	}
-	defer ofile.Close()
-
-	// - compress
-	w := zlib.NewWriter(ofile)
-	defer w.Close()
-
-	_, err = w.Write(fullObject)
+	err = writeObject(hex, fullObject)
 	if err != nil {
 		panic(err)
 	}
@@ -349,27 +309,7 @@ func cmdCommitTree(treeSHA, parentSHA, message string) [20]byte {
 	hex := fmt.Sprintf("%x", hash) // to HEX
 
 	// compress and write to file
-	odir := ".git/objects/" + hex[:2]
-	opath := odir + "/" + hex[2:]
-
-	// - create dir
-	if err := os.MkdirAll(odir, 0755); err != nil {
-		panic(err)
-	}
-
-	// - create file
-	ofile, err := os.Create(opath)
-	if err != nil {
-		fmt.Printf("failed to create file: %s", opath)
-		panic(err)
-	}
-	defer ofile.Close()
-
-	// - compress
-	w := zlib.NewWriter(ofile)
-	defer w.Close()
-
-	_, err = w.Write(fullObject)
+	err := writeObject(hex, fullObject)
 	if err != nil {
 		panic(err)
 	}
